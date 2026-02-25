@@ -17,6 +17,7 @@ class _HomePageState extends State<HomePage> {
   Future<void> _createContract() async {
     try {
       final user = FirebaseAuth.instance.currentUser;
+
       if (user == null) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -25,13 +26,23 @@ class _HomePageState extends State<HomePage> {
         return;
       }
 
+      final uid = user.uid;
+
+      // Create contract
       final docRef =
       await FirebaseFirestore.instance.collection('contracts').add({
-        'ownerUid': user.uid,
+        'ownerUid': uid,
         'ownerEmail': user.email ?? '',
         'title': 'New Contract',
         'status': 'Draft',
         'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      // Add audit log
+      await docRef.collection('auditLogs').add({
+        'action': 'Created',
+        'byUid': uid,
+        'at': FieldValue.serverTimestamp(),
       });
 
       if (!mounted) return;
@@ -101,26 +112,38 @@ class _HomePageState extends State<HomePage> {
                       child: Text('Error: ${snapshot.error}'),
                     );
                   }
+
                   if (!snapshot.hasData) {
-                    return const Center(child: CircularProgressIndicator());
+                    return const Center(
+                      child: CircularProgressIndicator(),
+                    );
                   }
 
                   final docs = snapshot.data!.docs;
+
                   if (docs.isEmpty) {
-                    return const Center(child: Text('No contracts yet.'));
+                    return const Center(
+                      child: Text('No contracts yet.'),
+                    );
                   }
 
                   return ListView.builder(
                     itemCount: docs.length,
                     itemBuilder: (context, i) {
-                      final data = docs[i].data() as Map<String, dynamic>;
-                      final title = (data['title'] ?? '').toString();
-                      final status = (data['status'] ?? '').toString();
+                      final data =
+                      docs[i].data() as Map<String, dynamic>;
+
+                      final title =
+                      (data['title'] ?? '').toString();
+                      final status =
+                      (data['status'] ?? '').toString();
                       final id = docs[i].id;
 
                       return Card(
                         child: ListTile(
-                          title: Text(title.isEmpty ? 'Contract' : title),
+                          title: Text(
+                            title.isEmpty ? 'Contract' : title,
+                          ),
                           subtitle: Text('Status: $status'),
                           trailing: Text(id.substring(0, 6)),
                         ),
