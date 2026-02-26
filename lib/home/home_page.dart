@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../services/contracts_service.dart';
+
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -10,6 +12,8 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
+  final ContractsService _contractsService = ContractsService();
+
   Future<void> _logout() async {
     await FirebaseAuth.instance.signOut();
   }
@@ -17,7 +21,6 @@ class _HomePageState extends State<HomePage> {
   Future<void> _createContract() async {
     try {
       final user = FirebaseAuth.instance.currentUser;
-
       if (user == null) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -26,24 +29,14 @@ class _HomePageState extends State<HomePage> {
         return;
       }
 
-      final uid = user.uid;
-
-      // Create contract
-      final docRef =
-      await FirebaseFirestore.instance.collection('contracts').add({
-        'ownerUid': uid,
-        'ownerEmail': user.email ?? '',
-        'title': 'New Contract',
-        'status': 'Draft',
-        'createdAt': FieldValue.serverTimestamp(),
-      });
-
-      // Add audit log
-      await docRef.collection('auditLogs').add({
-        'action': 'Created',
-        'byUid': uid,
-        'at': FieldValue.serverTimestamp(),
-      });
+      final docRef = await _contractsService.createContract(
+        title: 'New Contract',
+        description: 'Contract description',
+        recipientEmail: '',
+        recipientUid: '',
+        recipientContact: '',
+        recipientContactType: 'email',
+      );
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -60,7 +53,6 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
-    final email = user?.email ?? '';
 
     if (user == null) {
       return const Scaffold(
@@ -68,10 +60,10 @@ class _HomePageState extends State<HomePage> {
       );
     }
 
-    final query = FirebaseFirestore.instance
-        .collection('contracts')
-        .where('ownerUid', isEqualTo: user.uid)
-        .orderBy('createdAt', descending: true);
+    final email = user.email ?? '';
+
+    final Stream<QuerySnapshot<Map<String, dynamic>>> contractsStream =
+    _contractsService.streamMyContracts();
 
     return Scaffold(
       appBar: AppBar(
@@ -104,8 +96,8 @@ class _HomePageState extends State<HomePage> {
             ),
             const SizedBox(height: 8),
             Expanded(
-              child: StreamBuilder<QuerySnapshot>(
-                stream: query.snapshots(),
+              child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                stream: contractsStream,
                 builder: (context, snapshot) {
                   if (snapshot.hasError) {
                     return SingleChildScrollView(
@@ -114,38 +106,30 @@ class _HomePageState extends State<HomePage> {
                   }
 
                   if (!snapshot.hasData) {
-                    return const Center(
-                      child: CircularProgressIndicator(),
-                    );
+                    return const Center(child: CircularProgressIndicator());
                   }
 
                   final docs = snapshot.data!.docs;
 
                   if (docs.isEmpty) {
-                    return const Center(
-                      child: Text('No contracts yet.'),
-                    );
+                    return const Center(child: Text('No contracts yet.'));
                   }
 
                   return ListView.builder(
                     itemCount: docs.length,
                     itemBuilder: (context, i) {
-                      final data =
-                      docs[i].data() as Map<String, dynamic>;
-
-                      final title =
-                      (data['title'] ?? '').toString();
-                      final status =
-                      (data['status'] ?? '').toString();
+                      final data = docs[i].data();
+                      final title = (data['title'] ?? '').toString();
+                      final status = (data['status'] ?? '').toString();
                       final id = docs[i].id;
 
                       return Card(
                         child: ListTile(
-                          title: Text(
-                            title.isEmpty ? 'Contract' : title,
-                          ),
+                          title: Text(title.isEmpty ? 'Contract' : title),
                           subtitle: Text('Status: $status'),
-                          trailing: Text(id.substring(0, 6)),
+                          trailing: Text(
+                            id.length >= 6 ? id.substring(0, 6) : id,
+                          ),
                         ),
                       );
                     },
