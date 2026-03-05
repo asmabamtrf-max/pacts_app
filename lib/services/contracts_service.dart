@@ -21,12 +21,12 @@ class ContractsService {
     final docRef = await _db.collection('contracts').add({
       'ownerUid': user.uid,
       'ownerEmail': user.email ?? '',
+      'title': title,
+      'description': description,
       'recipientUid': recipientUid,
       'recipientEmail': recipientEmail,
       'recipientContact': recipientContact,
       'recipientContactType': recipientContactType,
-      'title': title,
-      'description': description,
       'status': 'Draft',
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
@@ -39,6 +39,35 @@ class ContractsService {
     });
 
     return docRef;
+  }
+
+  Future<void> updateContract({
+    required String contractId,
+    required String title,
+    required String description,
+    required String recipientEmail,
+    required String recipientContact,
+    required String recipientContactType,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) throw Exception('Not logged in');
+
+    final docRef = _db.collection('contracts').doc(contractId);
+
+    await docRef.update({
+      'title': title,
+      'description': description,
+      'recipientEmail': recipientEmail,
+      'recipientContact': recipientContact,
+      'recipientContactType': recipientContactType,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    await docRef.collection('auditLogs').add({
+      'action': 'Updated',
+      'byUid': user.uid,
+      'at': FieldValue.serverTimestamp(),
+    });
   }
 
   Stream<QuerySnapshot<Map<String, dynamic>>> streamMyContracts() {

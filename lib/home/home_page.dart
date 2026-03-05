@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:pacts_app/contracts/contract_editor_page.dart';
+import 'package:pacts_app/contracts/template_picker_page.dart';
 
 import '../services/contracts_service.dart';
 
@@ -19,33 +21,24 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _createContract() async {
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Not logged in')),
-        );
-        return;
-      }
+    final data = await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(builder: (_) => const TemplatePickerPage()),
+    );
 
-      final docRef = await _contractsService.createContract(
-        title: 'New Contract',
-        description: 'Contract description',
-        recipientEmail: '',
-        recipientUid: '',
-        recipientContact: '',
-        recipientContactType: 'email',
-      );
+    if (data == null) return;
 
-      if (!mounted) return;
+    if (!mounted) return;
+    final saved = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ContractEditorPage(templateData: data),
+      ),
+    );
+
+    if (saved == true && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Contract created: ${docRef.id}')),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Create failed: $e')),
+        const SnackBar(content: Text('Contract saved')),
       );
     }
   }
@@ -63,7 +56,7 @@ class _HomePageState extends State<HomePage> {
     final email = user.email ?? '';
 
     final Stream<QuerySnapshot<Map<String, dynamic>>> contractsStream =
-    _contractsService.streamMyContracts();
+        _contractsService.streamMyContracts();
 
     return Scaffold(
       appBar: AppBar(
@@ -127,9 +120,31 @@ class _HomePageState extends State<HomePage> {
                         child: ListTile(
                           title: Text(title.isEmpty ? 'Contract' : title),
                           subtitle: Text('Status: $status'),
-                          trailing: Text(
-                            id.length >= 6 ? id.substring(0, 6) : id,
-                          ),
+                          trailing:
+                              Text(id.length >= 6 ? id.substring(0, 6) : id),
+                          onTap: () async {
+                            final templateData = {
+                              'templateId': 'blank',
+                              'title': (data['title'] ?? '').toString(),
+                              'description':
+                                  (data['description'] ?? '').toString(),
+                            };
+
+                            await Navigator.push<bool>(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => ContractEditorPage(
+                                  templateData: templateData,
+                                  contractId: id,
+                                  initialRecipientEmail:
+                                      (data['recipientEmail'] ?? '').toString(),
+                                  initialRecipientContactType:
+                                      (data['recipientContactType'] ?? 'email')
+                                          .toString(),
+                                ),
+                              ),
+                            );
+                          },
                         ),
                       );
                     },
