@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:pacts_app/contracts/contract_editor_page.dart';
 import 'package:pacts_app/contracts/template_picker_page.dart';
+import 'package:pacts_app/contracts/contract_details_page.dart';
 
 import '../services/contracts_service.dart';
 
@@ -23,12 +24,14 @@ class _HomePageState extends State<HomePage> {
   Future<void> _createContract() async {
     final data = await Navigator.push<Map<String, dynamic>>(
       context,
-      MaterialPageRoute(builder: (_) => const TemplatePickerPage()),
+      MaterialPageRoute(
+        builder: (_) => const TemplatePickerPage(),
+      ),
     );
 
     if (data == null) return;
-
     if (!mounted) return;
+
     final saved = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
@@ -43,13 +46,60 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  Future<void> _editContract({
+    required String contractId,
+    required Map<String, dynamic> data,
+  }) async {
+    final templateData = {
+      'templateId': 'blank',
+      'title': (data['title'] ?? '').toString(),
+      'description': (data['description'] ?? '').toString(),
+    };
+
+    final updated = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ContractEditorPage(
+          templateData: templateData,
+          contractId: contractId,
+          initialRecipientEmail: (data['recipientEmail'] ?? '').toString(),
+          initialRecipientContactType:
+              (data['recipientContactType'] ?? 'email').toString(),
+        ),
+      ),
+    );
+
+    if (updated == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Contract updated')),
+      );
+    }
+  }
+
+  Future<void> _openDetails({
+    required String contractId,
+    required Map<String, dynamic> data,
+  }) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ContractDetailsPage(
+          contractId: contractId,
+          contractData: data,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
       return const Scaffold(
-        body: Center(child: Text('Not logged in')),
+        body: Center(
+          child: Text('Not logged in'),
+        ),
       );
     }
 
@@ -99,52 +149,54 @@ class _HomePageState extends State<HomePage> {
                   }
 
                   if (!snapshot.hasData) {
-                    return const Center(child: CircularProgressIndicator());
+                    return const Center(
+                      child: CircularProgressIndicator(),
+                    );
                   }
 
                   final docs = snapshot.data!.docs;
 
                   if (docs.isEmpty) {
-                    return const Center(child: Text('No contracts yet.'));
+                    return const Center(
+                      child: Text('No contracts yet.'),
+                    );
                   }
 
                   return ListView.builder(
                     itemCount: docs.length,
                     itemBuilder: (context, i) {
-                      final data = docs[i].data();
+                      final doc = docs[i];
+                      final data = doc.data();
                       final title = (data['title'] ?? '').toString();
                       final status = (data['status'] ?? '').toString();
-                      final id = docs[i].id;
+                      final id = doc.id;
 
                       return Card(
                         child: ListTile(
-                          title: Text(title.isEmpty ? 'Contract' : title),
+                          title: Text(
+                            title.isEmpty ? 'Contract' : title,
+                          ),
                           subtitle: Text('Status: $status'),
-                          trailing:
-                              Text(id.length >= 6 ? id.substring(0, 6) : id),
-                          onTap: () async {
-                            final templateData = {
-                              'templateId': 'blank',
-                              'title': (data['title'] ?? '').toString(),
-                              'description':
-                                  (data['description'] ?? '').toString(),
-                            };
-
-                            await Navigator.push<bool>(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => ContractEditorPage(
-                                  templateData: templateData,
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                tooltip: 'Edit',
+                                icon: const Icon(Icons.edit),
+                                onPressed: () => _editContract(
                                   contractId: id,
-                                  initialRecipientEmail:
-                                      (data['recipientEmail'] ?? '').toString(),
-                                  initialRecipientContactType:
-                                      (data['recipientContactType'] ?? 'email')
-                                          .toString(),
+                                  data: data,
                                 ),
                               ),
-                            );
-                          },
+                              Text(
+                                id.length >= 6 ? id.substring(0, 6) : id,
+                              ),
+                            ],
+                          ),
+                          onTap: () => _openDetails(
+                            contractId: id,
+                            data: data,
+                          ),
                         ),
                       );
                     },
