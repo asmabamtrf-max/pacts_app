@@ -8,6 +8,9 @@ class ContractsService {
   CollectionReference<Map<String, dynamic>> get _contractsRef =>
       _db.collection('contracts');
 
+  CollectionReference<Map<String, dynamic>> get _notificationsRef =>
+      _db.collection('notifications');
+
   User _requireUser() {
     final user = _auth.currentUser;
     if (user == null) {
@@ -38,18 +41,12 @@ class ContractsService {
       'status': 'Draft',
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
-
-      // Case 3 fields
       'shareStatus': 'NotShared',
       'sharedAt': null,
       'shareLink': '',
     });
 
-    await addAuditLog(
-      contractId: docRef.id,
-      action: 'Created',
-    );
-
+    await addAuditLog(contractId: docRef.id, action: 'Created');
     return docRef;
   }
 
@@ -72,10 +69,7 @@ class ContractsService {
       'updatedAt': FieldValue.serverTimestamp(),
     });
 
-    await addAuditLog(
-      contractId: contractId,
-      action: 'Updated',
-    );
+    await addAuditLog(contractId: contractId, action: 'Updated');
   }
 
   Stream<QuerySnapshot<Map<String, dynamic>>> streamMyContracts() {
@@ -90,6 +84,19 @@ class ContractsService {
         .snapshots();
   }
 
+  Stream<QuerySnapshot<Map<String, dynamic>>> streamIncomingContracts() {
+    final user = _auth.currentUser;
+    if (user == null || user.email == null) {
+      return const Stream.empty();
+    }
+
+    return _contractsRef
+        .where('recipientEmail', isEqualTo: user.email)
+        .where('shareStatus', isEqualTo: 'Shared')
+        .orderBy('sharedAt', descending: true)
+        .snapshots();
+  }
+
   Future<DocumentSnapshot<Map<String, dynamic>>> getContractById(
     String contractId,
   ) async {
@@ -97,17 +104,9 @@ class ContractsService {
     return await _contractsRef.doc(contractId).get();
   }
 
-  Future<String> generateShareLink({
-    required String contractId,
-  }) async {
+  Future<String> generateShareLink({required String contractId}) async {
     final user = _requireUser();
-
-    // رابط تجريبي آمن على حسب مشروعكم
-    // غيّره لاحقًا إذا عندكم domain حقيقي أو Firebase Dynamic Links / App Links
-    final link =
-        'https://pacts.app/share?contractId=$contractId&ownerUid=${user.uid}';
-
-    return link;
+    return 'https://pacts.app/share?contractId=$contractId&ownerUid=${user.uid}';
   }
 
   Future<void> addAuditLog({
@@ -121,6 +120,65 @@ class ContractsService {
       'byUid': user.uid,
       'at': FieldValue.serverTimestamp(),
     });
+  }
+
+  Future<void> createNotification({
+    required String recipientEmail,
+    required String contractId,
+    required String contractTitle,
+    required String ownerEmail,
+    required String action,
+  }) async {
+    await _notificationsRef.add({
+      'recipientEmail': recipientEmail,
+      'contractId': contractId,
+      'contractTitle': contractTitle,
+      'ownerEmail': ownerEmail,
+      'action': action,
+      'isRead': false,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> streamUnreadNotifications(
+    String userEmail,
+  ) {
+    return _notificationsRef
+        .where('recipientEmail', isEqualTo: userEmail)
+        .where('isRead', isEqualTo: false)
+        .orderBy('createdAt', descending: true)
+        .snapshots();
+  }
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> streamAllNotifications(
+    String userEmail,
+  ) {
+    return _notificationsRef
+        .where('recipientEmail', isEqualTo: userEmail)
+        .orderBy('createdAt', descending: true)
+        .limit(20)
+        .snapshots();
+  }
+
+  Future<void> markNotificationAsRead(String notificationId) async {
+    await _notificationsRef.doc(notificationId).update({'isRead': true});
+  }
+
+  Future<void> markAllNotificationsAsRead(String userEmail) async {
+    final snapshot = await _notificationsRef
+        .where('recipientEmail', isEqualTo: userEmail)
+        .where('isRead', isEqualTo: false)
+        .get();
+
+    final batch = _db.batch();
+    for (var doc in snapshot.docs) {
+      batch.update(doc.reference, {'isRead': true});
+    }
+    await batch.commit();
+  }
+
+  Future<void> deleteNotification(String notificationId) async {
+    await _notificationsRef.doc(notificationId).delete();
   }
 
   Future<void> shareContract({
@@ -160,12 +218,134 @@ class ContractsService {
       'sharedAt': FieldValue.serverTimestamp(),
       'shareLink': shareLink,
       'updatedAt': FieldValue.serverTimestamp(),
-      'status': 'Sent',
+      'status': 'Shared',
     });
 
-    await addAuditLog(
+    await addAuditLog(contractId: contractId, action: 'Shared');
+
+    await createNotification(
+      recipientEmail: recipientEmail,
       contractId: contractId,
+      contractTitle: data['title'] ?? 'New Contract',
+      ownerEmail: user.email ?? '',
       action: 'Shared',
     );
+  }
+
+  Future<void> signContract({
+    required String contractId,
+    required String signedByUid,
+    required String signedByEmail,
+  }) async {
+    final docRef = _contractsRef.doc(contractId);
+    final doc = await docRef.get();
+
+    if (!doc.exists) {
+      throw Exception('Contract not found');
+    }
+
+    final data = doc.data()!;
+    final recipientEmail = (data['recipientEmail'] ?? '').toString();
+
+    if (signedByEmail != recipientEmail) {
+      throw Exception('Only recipient can sign this contract');
+    }
+
+    final status = (data['status'] ?? '').toString();
+    if (status == 'Signed') {
+      throw Exception('Contract already signed');
+    }
+    if (status == 'Rejected') {
+      throw Exception('Contract was rejected');
+    }
+
+    await docRef.update({
+      'status': 'Signed',
+      'signedAt': FieldValue.serverTimestamp(),
+      'signedByUid': signedByUid,
+      'signedByEmail': signedByEmail,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    await addAuditLog(contractId: contractId, action: 'Signed');
+  }
+
+  Future<void> rejectContract({
+    required String contractId,
+    required String rejectedByUid,
+    required String rejectedByEmail,
+  }) async {
+    final docRef = _contractsRef.doc(contractId);
+    final doc = await docRef.get();
+
+    if (!doc.exists) {
+      throw Exception('Contract not found');
+    }
+
+    final data = doc.data()!;
+    final recipientEmail = (data['recipientEmail'] ?? '').toString();
+
+    if (rejectedByEmail != recipientEmail) {
+      throw Exception('Only recipient can reject this contract');
+    }
+
+    await docRef.update({
+      'status': 'Rejected',
+      'rejectedAt': FieldValue.serverTimestamp(),
+      'rejectedByUid': rejectedByUid,
+      'rejectedByEmail': rejectedByEmail,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    await addAuditLog(contractId: contractId, action: 'Rejected');
+  }
+
+  Future<void> deleteContract({required String contractId}) async {
+    final user = _requireUser();
+
+    final doc = await _contractsRef.doc(contractId).get();
+    if (!doc.exists) throw Exception('Contract not found');
+
+    final data = doc.data()!;
+    final ownerUid = data['ownerUid'] as String?;
+    final status = data['status'] as String?;
+
+    if (ownerUid != user.uid) {
+      throw Exception('Only the owner can delete this contract');
+    }
+
+    if (status == 'Signed') {
+      throw Exception('Cannot delete a signed contract');
+    }
+
+    final auditLogs = _contractsRef.doc(contractId).collection('auditLogs');
+    final logsSnapshot = await auditLogs.get();
+    for (var logDoc in logsSnapshot.docs) {
+      await logDoc.reference.delete();
+    }
+
+    await _contractsRef.doc(contractId).delete();
+  }
+
+  Stream<DocumentSnapshot<Map<String, dynamic>>> streamContractStatus(
+    String contractId,
+  ) {
+    return _contractsRef.doc(contractId).snapshots();
+  }
+
+  Future<bool> canUserSignContract(String contractId) async {
+    final user = _auth.currentUser;
+    if (user == null) return false;
+
+    final doc = await _contractsRef.doc(contractId).get();
+    if (!doc.exists) return false;
+
+    final data = doc.data()!;
+    final recipientEmail = data['recipientEmail'] as String?;
+    final status = data['status'] as String?;
+
+    return recipientEmail == user.email &&
+        status != 'Signed' &&
+        status != 'Rejected';
   }
 }
