@@ -11,6 +11,12 @@ class ContractsService {
   CollectionReference<Map<String, dynamic>> get _notificationsRef =>
       _db.collection('notifications');
 
+  CollectionReference<Map<String, dynamic>> get _revisionRequestsRef =>
+      _db.collection('revisionRequests');
+
+  CollectionReference<Map<String, dynamic>> get _remindersRef =>
+      _db.collection('reminders');
+
   User _requireUser() {
     final user = _auth.currentUser;
     if (user == null) {
@@ -112,14 +118,30 @@ class ContractsService {
   Future<void> addAuditLog({
     required String contractId,
     required String action,
+    String? details,
   }) async {
-    final user = _requireUser();
+    final user = _auth.currentUser;
 
     await _contractsRef.doc(contractId).collection('auditLogs').add({
       'action': action,
-      'byUid': user.uid,
+      'byUid': user?.uid ?? 'system',
+      'byEmail': user?.email ?? 'system',
+      'details': details ?? '',
       'at': FieldValue.serverTimestamp(),
     });
+  }
+
+  Stream<List<Map<String, dynamic>>> streamContractHistory(String contractId) {
+    return _contractsRef
+        .doc(contractId)
+        .collection('auditLogs')
+        .orderBy('at', descending: true)
+        .snapshots()
+        .map((snapshot) => snapshot.docs.map((doc) {
+              final data = doc.data();
+              data['id'] = doc.id;
+              return data;
+            }).toList());
   }
 
   Future<void> createNotification({
@@ -128,6 +150,7 @@ class ContractsService {
     required String contractTitle,
     required String ownerEmail,
     required String action,
+    String? details,
   }) async {
     await _notificationsRef.add({
       'recipientEmail': recipientEmail,
@@ -135,6 +158,7 @@ class ContractsService {
       'contractTitle': contractTitle,
       'ownerEmail': ownerEmail,
       'action': action,
+      'details': details ?? '',
       'isRead': false,
       'createdAt': FieldValue.serverTimestamp(),
     });
@@ -179,6 +203,170 @@ class ContractsService {
 
   Future<void> deleteNotification(String notificationId) async {
     await _notificationsRef.doc(notificationId).delete();
+  }
+
+  Future<void> requestRevision({
+    required String contractId,
+    required String requestedByUid,
+    required String requestedByEmail,
+    required String reason,
+  }) async {
+    final docRef = _contractsRef.doc(contractId);
+    final doc = await docRef.get();
+
+    if (!doc.exists) {
+      throw Exception('Contract not found');
+    }
+
+    final data = doc.data()!;
+    final ownerEmail = (data['ownerEmail'] ?? '').toString();
+    final status = (data['status'] ?? '').toString();
+
+    if (status != 'Shared') {
+      throw Exception('Can only request revision for shared contracts');
+    }
+
+    await _revisionRequestsRef.add({
+      'contractId': contractId,
+      'requestedByUid': requestedByUid,
+      'requestedByEmail': requestedByEmail,
+      'reason': reason,
+      'status': 'Pending',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+
+    await _contractsRef.doc(contractId).update({
+      'status': 'RevisionRequested',
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    await addAuditLog(
+      contractId: contractId,
+      action: 'RevisionRequested',
+      details: reason,
+    );
+
+    await createNotification(
+      recipientEmail: ownerEmail,
+      contractId: contractId,
+      contractTitle: data['title'] ?? 'Contract',
+      ownerEmail: requestedByEmail,
+      action: 'RevisionRequested',
+      details: reason,
+    );
+  }
+
+  Future<void> respondToRevision({
+    required String revisionRequestId,
+    required String response,
+    required String contractId,
+  }) async {
+    final user = _requireUser();
+
+    await _revisionRequestsRef.doc(revisionRequestId).update({
+      'status': response,
+      'respondedAt': FieldValue.serverTimestamp(),
+      'respondedByUid': user.uid,
+    });
+
+    final revisionDoc =
+        await _revisionRequestsRef.doc(revisionRequestId).get();
+    final revisionData = revisionDoc.data()!;
+    final requestedByEmail = revisionData['requestedByEmail'] as String;
+
+    await createNotification(
+      recipientEmail: requestedByEmail,
+      contractId: contractId,
+      contractTitle: 'Contract Revision',
+      ownerEmail: user.email ?? '',
+      action: 'RevisionResponded',
+      details: response,
+    );
+
+    if (response == 'Completed') {
+      await _contractsRef.doc(contractId).update({
+        'status': 'Shared',
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    }
+  }
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> streamRevisionRequests(
+    String contractId,
+  ) {
+    return _revisionRequestsRef
+        .where('contractId', isEqualTo: contractId)
+        .orderBy('createdAt', descending: true)
+        .snapshots();
+  }
+
+  Future<void> sendReminder({
+    required String contractId,
+    required String recipientEmail,
+    required String reminderType,
+  }) async {
+    final user = _requireUser();
+
+    final doc = await _contractsRef.doc(contractId).get();
+    if (!doc.exists) {
+      throw Exception('Contract not found');
+    }
+
+    final data = doc.data()!;
+    final status = (data['status'] ?? '').toString();
+
+    if (status != 'Shared') {
+      throw Exception('Can only send reminder for shared contracts');
+    }
+
+    final lastReminder = await _remindersRef
+        .where('contractId', isEqualTo: contractId)
+        .where('recipientEmail', isEqualTo: recipientEmail)
+        .orderBy('sentAt', descending: true)
+        .limit(1)
+        .get();
+
+    if (lastReminder.docs.isNotEmpty) {
+      final lastSent = (lastReminder.docs.first.data()['sentAt'] as Timestamp)
+          .toDate();
+      final hoursSinceLast = DateTime.now().difference(lastSent).inHours;
+      if (hoursSinceLast < 24) {
+        throw Exception('Reminder already sent within 24 hours');
+      }
+    }
+
+    await _remindersRef.add({
+      'contractId': contractId,
+      'recipientEmail': recipientEmail,
+      'reminderType': reminderType,
+      'sentByUid': user.uid,
+      'sentByEmail': user.email ?? '',
+      'sentAt': FieldValue.serverTimestamp(),
+    });
+
+    await createNotification(
+      recipientEmail: recipientEmail,
+      contractId: contractId,
+      contractTitle: data['title'] ?? 'Contract',
+      ownerEmail: user.email ?? '',
+      action: 'Reminder',
+      details: reminderType,
+    );
+
+    await addAuditLog(
+      contractId: contractId,
+      action: 'ReminderSent',
+      details: 'Reminder sent to $recipientEmail',
+    );
+  }
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> streamReminders(
+    String contractId,
+  ) {
+    return _remindersRef
+        .where('contractId', isEqualTo: contractId)
+        .orderBy('sentAt', descending: true)
+        .snapshots();
   }
 
   Future<void> shareContract({

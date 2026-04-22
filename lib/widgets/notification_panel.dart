@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import '../services/contracts_service.dart';
+import '../theme/app_colors.dart';
 
 class NotificationPanel extends StatefulWidget {
   final String userEmail;
@@ -25,6 +26,9 @@ class _NotificationPanelState extends State<NotificationPanel> {
     return Container(
       height: MediaQuery.of(context).size.height * 0.7,
       padding: const EdgeInsets.all(16),
+      decoration: const BoxDecoration(
+        color: AppColors.backgroundDark,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -34,23 +38,27 @@ class _NotificationPanelState extends State<NotificationPanel> {
               const Text(
                 'Notifications',
                 style: TextStyle(
-                  fontSize: 20,
+                  fontSize: 18,
                   fontWeight: FontWeight.bold,
+                  color: AppColors.gold,
                 ),
               ),
               Row(
                 children: [
                   TextButton(
                     onPressed: () => setState(() => _showAll = !_showAll),
-                    child: Text(_showAll ? 'Unread' : 'All'),
+                    child: Text(
+                      _showAll ? 'Unread' : 'All',
+                      style: const TextStyle(color: AppColors.whiteMuted),
+                    ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.done_all),
+                    icon: const Icon(Icons.done_all, color: AppColors.gold),
                     tooltip: 'Mark all as read',
                     onPressed: () => _markAllAsRead(),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.close),
+                    icon: const Icon(Icons.close, color: AppColors.red),
                     tooltip: 'Close',
                     onPressed: () => Navigator.pop(context),
                   ),
@@ -58,17 +66,24 @@ class _NotificationPanelState extends State<NotificationPanel> {
               ),
             ],
           ),
-          const Divider(),
+          const Divider(color: AppColors.grey),
           Expanded(
             child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: notificationStream,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
+                  return const Center(
+                    child: CircularProgressIndicator(color: AppColors.gold),
+                  );
                 }
 
                 if (snapshot.hasError) {
-                  return Center(child: Text('Error: ${snapshot.error}'));
+                  return Center(
+                    child: Text(
+                      'Error: ${snapshot.error}',
+                      style: const TextStyle(color: AppColors.red),
+                    ),
+                  );
                 }
 
                 final docs = snapshot.data?.docs ?? [];
@@ -78,17 +93,19 @@ class _NotificationPanelState extends State<NotificationPanel> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(
+                        const Icon(
                           Icons.notifications_none,
                           size: 64,
-                          color: Colors.grey.shade400,
+                          color: AppColors.grey,
                         ),
                         const SizedBox(height: 16),
                         Text(
                           _showAll
                               ? 'No notifications'
                               : 'No unread notifications',
-                          style: TextStyle(color: Colors.grey.shade600),
+                          style: const TextStyle(
+                            color: AppColors.whiteMuted,
+                          ),
                         ),
                       ],
                     ),
@@ -126,27 +143,27 @@ class _NotificationPanelState extends State<NotificationPanel> {
     switch (action.toString().toLowerCase()) {
       case 'shared':
         icon = Icons.share;
-        color = Colors.blue;
+        color = AppColors.gold;
         actionText = 'Shared a contract with you';
         break;
       case 'signed':
         icon = Icons.check_circle;
-        color = Colors.green;
+        color = AppColors.green;
         actionText = 'Signed the contract';
         break;
       case 'rejected':
         icon = Icons.cancel;
-        color = Colors.red;
+        color = AppColors.red;
         actionText = 'Rejected the contract';
         break;
       case 'updated':
         icon = Icons.edit;
-        color = Colors.orange;
+        color = AppColors.gold;
         actionText = 'Updated the contract';
         break;
       default:
         icon = Icons.info;
-        color = Colors.grey;
+        color = AppColors.grey;
         actionText = action;
     }
 
@@ -157,20 +174,29 @@ class _NotificationPanelState extends State<NotificationPanel> {
       background: Container(
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 16),
-        color: Colors.red,
-        child: const Icon(Icons.delete, color: Colors.white),
+        color: AppColors.red,
+        child: const Icon(Icons.delete, color: AppColors.white),
       ),
-      child: Card(
-        margin: const EdgeInsets.only(bottom: 8),
-        color: isRead ? Colors.white : Colors.blue.shade50,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        decoration: BoxDecoration(
+          color: AppColors.backgroundCard,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isRead
+                ? AppColors.grey.withOpacity(0.3)
+                : AppColors.gold.withOpacity(0.4),
+          ),
+        ),
         child: ListTile(
           leading: CircleAvatar(
-            backgroundColor: color.withOpacity(0.1),
+            backgroundColor: color.withOpacity(0.15),
             child: Icon(icon, color: color),
           ),
           title: Text(
             contractTitle,
             style: TextStyle(
+              color: AppColors.white,
               fontWeight: isRead ? FontWeight.normal : FontWeight.bold,
             ),
           ),
@@ -178,11 +204,17 @@ class _NotificationPanelState extends State<NotificationPanel> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const SizedBox(height: 4),
-              Text('$actionText by: $ownerEmail'),
+              Text(
+                '$actionText by: $ownerEmail',
+                style: const TextStyle(color: AppColors.whiteMuted),
+              ),
               const SizedBox(height: 2),
               Text(
                 _formatDate(createdAt),
-                style: TextStyle(color: Colors.grey.shade600, fontSize: 11),
+                style: const TextStyle(
+                  color: AppColors.grey,
+                  fontSize: 11,
+                ),
               ),
             ],
           ),
@@ -191,7 +223,7 @@ class _NotificationPanelState extends State<NotificationPanel> {
                   width: 8,
                   height: 8,
                   decoration: const BoxDecoration(
-                    color: Colors.blue,
+                    color: AppColors.gold,
                     shape: BoxShape.circle,
                   ),
                 )
@@ -207,9 +239,7 @@ class _NotificationPanelState extends State<NotificationPanel> {
     String contractId,
   ) async {
     await _contractsService.markNotificationAsRead(notificationId);
-    if (mounted) {
-      Navigator.pop(context);
-    }
+    if (mounted) Navigator.pop(context);
   }
 
   Future<void> _markAllAsRead() async {
