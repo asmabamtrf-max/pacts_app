@@ -1,4 +1,3 @@
-
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -14,6 +13,8 @@ class AppColors {
   static const Color white = Color(0xFFF8F9FA);
   static const Color whiteMuted = Color(0xFF9CA3AF);
   static const Color orange = Color(0xFFFFA500);
+  static const Color green = Color(0xFF22C55E);
+  static const Color red = Color(0xFFEF4444);
 }
 
 class EmailLoginPage extends StatefulWidget {
@@ -40,6 +41,20 @@ class _EmailLoginPageState extends State<EmailLoginPage>
   late final AnimationController _fadeController;
   late final Animation<double> _fadeAnimation;
 
+  bool get _hasMinLength => _passwordController.text.trim().length >= 8;
+  bool get _hasLowerCase => RegExp(r'[a-z]').hasMatch(_passwordController.text);
+  bool get _hasUpperCase => RegExp(r'[A-Z]').hasMatch(_passwordController.text);
+  bool get _hasNumber => RegExp(r'[0-9]').hasMatch(_passwordController.text);
+  bool get _hasSymbol => RegExp(r'[!@#$%^&*(),.?":{}|<>_\-+=/\\\[\]~`]')
+      .hasMatch(_passwordController.text);
+
+  bool get _isStrongPassword =>
+      _hasMinLength &&
+      _hasLowerCase &&
+      _hasUpperCase &&
+      _hasNumber &&
+      _hasSymbol;
+
   @override
   void initState() {
     super.initState();
@@ -65,6 +80,7 @@ class _EmailLoginPageState extends State<EmailLoginPage>
   Future<void> _ensureUserDoc(User user) async {
     final ref = FirebaseFirestore.instance.collection('users').doc(user.uid);
     final snap = await ref.get();
+
     if (!snap.exists) {
       await ref.set({
         'email': user.email ?? '',
@@ -75,6 +91,7 @@ class _EmailLoginPageState extends State<EmailLoginPage>
 
   void _snack(String msg) {
     if (!mounted) return;
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(msg),
@@ -88,32 +105,43 @@ class _EmailLoginPageState extends State<EmailLoginPage>
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+
     setState(() => _loading = true);
+
     try {
       final email = _emailController.text.trim();
       final password = _passwordController.text.trim();
+
       UserCredential cred;
+
       if (_isLogin) {
         cred = await FirebaseAuth.instance.signInWithEmailAndPassword(
           email: email,
           password: password,
         );
+
         final user = cred.user;
+
         if (user == null) {
           _snack('Login failed');
           return;
         }
+
         await user.reload();
+
         final refreshed = FirebaseAuth.instance.currentUser;
+
         if (refreshed == null) {
           _snack('Login failed');
           return;
         }
+
         if (!refreshed.emailVerified) {
           setState(() => _pendingVerifiedUser = refreshed);
           _snack('Email not verified. Please verify first.');
           return;
         }
+
         await _ensureUserDoc(refreshed);
         _snack('Login success');
       } else {
@@ -121,22 +149,29 @@ class _EmailLoginPageState extends State<EmailLoginPage>
           email: email,
           password: password,
         );
+
         final user = cred.user;
+
         if (user == null) {
           _snack('Register failed');
           return;
         }
+
         await _ensureUserDoc(user);
+
         if (!user.emailVerified) {
           await user.sendEmailVerification();
           _snack('Verification email sent. Please verify, then login.');
         } else {
           _snack('Account created');
         }
+
         await FirebaseAuth.instance.signOut();
+
         setState(() {
           _isLogin = true;
           _pendingVerifiedUser = null;
+          _passwordController.clear();
         });
       }
     } on FirebaseAuthException catch (e) {
@@ -159,7 +194,7 @@ class _EmailLoginPageState extends State<EmailLoginPage>
       case 'invalid-email':
         return 'Invalid email address';
       case 'weak-password':
-        return 'Password should be at least 6 characters';
+        return 'Password must be at least 8 characters and include uppercase, lowercase, number, and symbol';
       default:
         return 'Authentication error';
     }
@@ -167,11 +202,14 @@ class _EmailLoginPageState extends State<EmailLoginPage>
 
   Future<void> _handleForgotPassword() async {
     final email = _emailController.text.trim();
+
     if (email.isEmpty || !email.contains('@')) {
       _snack('Please enter a valid email address');
       return;
     }
+
     setState(() => _loading = true);
+
     try {
       await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
       _snack('Password reset email sent to $email');
@@ -187,10 +225,12 @@ class _EmailLoginPageState extends State<EmailLoginPage>
   Future<void> _resendVerification() async {
     try {
       final user = FirebaseAuth.instance.currentUser ?? _pendingVerifiedUser;
+
       if (user == null) {
         _snack('No user session. Login again.');
         return;
       }
+
       await user.sendEmailVerification();
       _snack('Verification email resent.');
     } catch (e) {
@@ -201,12 +241,16 @@ class _EmailLoginPageState extends State<EmailLoginPage>
   Future<void> _refreshVerification() async {
     try {
       final user = FirebaseAuth.instance.currentUser ?? _pendingVerifiedUser;
+
       if (user == null) {
         _snack('No user session. Login again.');
         return;
       }
+
       await user.reload();
+
       final refreshed = FirebaseAuth.instance.currentUser;
+
       if (refreshed != null && refreshed.emailVerified) {
         setState(() => _pendingVerifiedUser = null);
         await _ensureUserDoc(refreshed);
@@ -222,6 +266,7 @@ class _EmailLoginPageState extends State<EmailLoginPage>
   @override
   Widget build(BuildContext context) {
     final title = _isLogin ? 'Login' : 'Register';
+
     return Scaffold(
       backgroundColor: AppColors.backgroundDark,
       body: Stack(
@@ -285,7 +330,8 @@ class _EmailLoginPageState extends State<EmailLoginPage>
                     else
                       _buildFormCard(title),
                     const SizedBox(height: 24),
-                    if (_isLogin && !_showForgotPassword) _buildForgotPasswordLink(),
+                    if (_isLogin && !_showForgotPassword)
+                      _buildForgotPasswordLink(),
                     const SizedBox(height: 16),
                     if (!_showForgotPassword) _buildToggleAuth(),
                     const SizedBox(height: 32),
@@ -309,10 +355,14 @@ class _EmailLoginPageState extends State<EmailLoginPage>
               width: 60,
               height: 60,
               decoration: BoxDecoration(
-                gradient: LinearGradient(
+                gradient: const LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
-                  colors: [AppColors.goldLight, AppColors.gold, AppColors.goldDark],
+                  colors: [
+                    AppColors.goldLight,
+                    AppColors.gold,
+                    AppColors.goldDark,
+                  ],
                 ),
                 borderRadius: BorderRadius.circular(16),
                 boxShadow: [
@@ -339,11 +389,14 @@ class _EmailLoginPageState extends State<EmailLoginPage>
                     right: 8,
                     child: Column(
                       children: [
-                        Container(width: 12, height: 1.5, color: Colors.black54),
+                        Container(
+                            width: 12, height: 1.5, color: Colors.black54),
                         const SizedBox(height: 3),
-                        Container(width: 14, height: 1.5, color: Colors.black54),
+                        Container(
+                            width: 14, height: 1.5, color: Colors.black54),
                         const SizedBox(height: 3),
-                        Container(width: 10, height: 1.5, color: Colors.black54),
+                        Container(
+                            width: 10, height: 1.5, color: Colors.black54),
                       ],
                     ),
                   ),
@@ -352,10 +405,14 @@ class _EmailLoginPageState extends State<EmailLoginPage>
             ),
             const SizedBox(width: 8),
             ShaderMask(
-              shaderCallback: (bounds) => LinearGradient(
+              shaderCallback: (bounds) => const LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [AppColors.goldLight, AppColors.gold, AppColors.goldDark],
+                colors: [
+                  AppColors.goldLight,
+                  AppColors.gold,
+                  AppColors.goldDark,
+                ],
               ).createShader(bounds),
               child: const Text(
                 'ACTS',
@@ -395,7 +452,7 @@ class _EmailLoginPageState extends State<EmailLoginPage>
           ),
         ),
         const SizedBox(height: 8),
-        Text(
+        const Text(
           'Secure Contract Management',
           style: TextStyle(
             color: AppColors.whiteMuted,
@@ -444,14 +501,16 @@ class _EmailLoginPageState extends State<EmailLoginPage>
             const SizedBox(height: 24),
             _buildInputField(
               controller: _emailController,
-              label: _isLogin ? 'Email' : 'Username',
-              hint: _isLogin ? 'example@email.com' : 'Enter username',
-              icon: Icons.person_outline,
+              label: 'Email',
+              hint: 'example@email.com',
+              icon: Icons.email_outlined,
               keyboardType: TextInputType.emailAddress,
               validator: (v) {
                 final value = (v ?? '').trim();
+
                 if (value.isEmpty) return 'Required';
-                if (_isLogin && !value.contains('@')) return 'Enter valid email';
+                if (!value.contains('@')) return 'Enter valid email';
+
                 return null;
               },
             ),
@@ -462,21 +521,33 @@ class _EmailLoginPageState extends State<EmailLoginPage>
               hint: 'Enter your password',
               icon: Icons.lock_outline,
               obscureText: _obscurePassword,
+              onChanged: (_) => setState(() {}),
               suffixIcon: IconButton(
                 icon: Icon(
                   _obscurePassword ? Icons.visibility : Icons.visibility_off,
                   color: AppColors.gold,
                   size: 20,
                 ),
-                onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                onPressed: () {
+                  setState(() => _obscurePassword = !_obscurePassword);
+                },
               ),
               validator: (v) {
                 final value = (v ?? '').trim();
+
                 if (value.isEmpty) return 'Required';
-                if (value.length < 6) return 'Min 6 characters';
+
+                if (!_isLogin && !_isStrongPassword) {
+                  return 'Password does not meet the requirements';
+                }
+
                 return null;
               },
             ),
+            if (!_isLogin) ...[
+              const SizedBox(height: 14),
+              _buildPasswordRules(),
+            ],
             if (_isLogin) ...[
               const SizedBox(height: 16),
               Row(
@@ -489,15 +560,20 @@ class _EmailLoginPageState extends State<EmailLoginPage>
                       decoration: BoxDecoration(
                         border: Border.all(color: AppColors.gold),
                         borderRadius: BorderRadius.circular(4),
-                        color: _rememberMe ? AppColors.gold : Colors.transparent,
+                        color:
+                            _rememberMe ? AppColors.gold : Colors.transparent,
                       ),
                       child: _rememberMe
-                          ? const Icon(Icons.check, size: 14, color: Colors.black)
+                          ? const Icon(
+                              Icons.check,
+                              size: 14,
+                              color: Colors.black,
+                            )
                           : null,
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Text(
+                  const Text(
                     'Remember me',
                     style: TextStyle(
                       color: AppColors.whiteMuted,
@@ -522,6 +598,62 @@ class _EmailLoginPageState extends State<EmailLoginPage>
             ],
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildPasswordRules() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.backgroundDark.withOpacity(0.45),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.gold.withOpacity(0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Password requirements',
+            style: TextStyle(
+              color: AppColors.gold,
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 10),
+          _buildPasswordRuleItem('At least 8 characters', _hasMinLength),
+          _buildPasswordRuleItem('Contains lowercase letter', _hasLowerCase),
+          _buildPasswordRuleItem('Contains uppercase letter', _hasUpperCase),
+          _buildPasswordRuleItem('Contains number', _hasNumber),
+          _buildPasswordRuleItem('Contains symbol', _hasSymbol),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPasswordRuleItem(String text, bool isValid) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 7),
+      child: Row(
+        children: [
+          Icon(
+            isValid ? Icons.check_circle : Icons.radio_button_unchecked,
+            size: 17,
+            color: isValid ? AppColors.green : AppColors.whiteMuted,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                color: isValid ? AppColors.green : AppColors.whiteMuted,
+                fontSize: 12.5,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -559,7 +691,7 @@ class _EmailLoginPageState extends State<EmailLoginPage>
             ),
           ),
           const SizedBox(height: 24),
-          Text(
+          const Text(
             'Enter your email to receive a password reset link',
             style: TextStyle(
               color: AppColors.whiteMuted,
@@ -574,12 +706,6 @@ class _EmailLoginPageState extends State<EmailLoginPage>
             hint: 'example@email.com',
             icon: Icons.email_outlined,
             keyboardType: TextInputType.emailAddress,
-            validator: (v) {
-              final value = (v ?? '').trim();
-              if (value.isEmpty) return 'Required';
-              if (!value.contains('@')) return 'Enter valid email';
-              return null;
-            },
           ),
           const SizedBox(height: 28),
           SizedBox(
@@ -620,6 +746,7 @@ class _EmailLoginPageState extends State<EmailLoginPage>
     bool obscureText = false,
     Widget? suffixIcon,
     String? Function(String?)? validator,
+    void Function(String)? onChanged,
   }) {
     return Container(
       decoration: BoxDecoration(
@@ -631,19 +758,29 @@ class _EmailLoginPageState extends State<EmailLoginPage>
         controller: controller,
         keyboardType: keyboardType,
         obscureText: obscureText,
+        onChanged: onChanged,
         style: const TextStyle(color: AppColors.white, fontSize: 15),
         decoration: InputDecoration(
           labelText: label,
           hintText: hint,
-          labelStyle: TextStyle(color: AppColors.whiteMuted, fontSize: 13),
-          hintStyle: TextStyle(color: AppColors.whiteMuted.withOpacity(0.7), fontSize: 14),
+          labelStyle: const TextStyle(
+            color: AppColors.whiteMuted,
+            fontSize: 13,
+          ),
+          hintStyle: TextStyle(
+            color: AppColors.whiteMuted.withOpacity(0.7),
+            fontSize: 14,
+          ),
           prefixIcon: Container(
             padding: const EdgeInsets.all(12),
             child: Icon(icon, color: AppColors.gold, size: 20),
           ),
           suffixIcon: suffixIcon,
           border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 16,
+          ),
         ),
         validator: validator,
       ),
@@ -659,30 +796,37 @@ class _EmailLoginPageState extends State<EmailLoginPage>
       child: InkWell(
         onTap: onPressed,
         borderRadius: BorderRadius.circular(16),
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [AppColors.goldLight, AppColors.gold, AppColors.bronze],
-            ),
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.gold.withOpacity(0.4),
-                blurRadius: 15,
-                offset: const Offset(0, 4),
+        child: Opacity(
+          opacity: onPressed == null ? 0.55 : 1,
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  AppColors.goldLight,
+                  AppColors.gold,
+                  AppColors.bronze,
+                ],
               ),
-            ],
-          ),
-          child: Center(
-            child: Text(
-              text,
-              style: TextStyle(
-                color: AppColors.backgroundDark,
-                fontSize: 15,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 1.5,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.gold.withOpacity(0.4),
+                  blurRadius: 15,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Center(
+              child: Text(
+                text,
+                style: const TextStyle(
+                  color: AppColors.backgroundDark,
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.5,
+                ),
               ),
             ),
           ),
@@ -716,7 +860,7 @@ class _EmailLoginPageState extends State<EmailLoginPage>
       children: [
         Text(
           _isLogin ? "Don't have an account?" : "Already have an account?",
-          style: TextStyle(color: AppColors.whiteMuted, fontSize: 13),
+          style: const TextStyle(color: AppColors.whiteMuted, fontSize: 13),
         ),
         const SizedBox(width: 4),
         GestureDetector(
@@ -729,6 +873,7 @@ class _EmailLoginPageState extends State<EmailLoginPage>
                     _showForgotPassword = false;
                     _passwordController.clear();
                   });
+
                   _fadeController.reset();
                   _fadeController.forward();
                 },
@@ -756,11 +901,15 @@ class _EmailLoginPageState extends State<EmailLoginPage>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          const Row(
             children: [
-              Icon(Icons.warning_amber_rounded, color: AppColors.orange, size: 20),
-              const SizedBox(width: 8),
-              const Text(
+              Icon(
+                Icons.warning_amber_rounded,
+                color: AppColors.orange,
+                size: 20,
+              ),
+              SizedBox(width: 8),
+              Text(
                 'Email verification required',
                 style: TextStyle(
                   color: AppColors.orange,
@@ -815,13 +964,17 @@ class TexturePainter extends CustomPainter {
     final paint = Paint()
       ..color = Colors.white.withOpacity(0.03)
       ..strokeWidth = 1;
+
     for (double i = 0; i < size.height; i += 3) {
       canvas.drawLine(Offset(0, i), Offset(size.width, i), paint);
     }
+
     final random = math.Random(42);
+
     for (int i = 0; i < 200; i++) {
       final x = random.nextDouble() * size.width;
       final y = random.nextDouble() * size.height;
+
       canvas.drawCircle(
         Offset(x, y),
         0.5,
@@ -848,17 +1001,21 @@ class WavePainter extends CustomPainter {
         ],
       ).createShader(Rect.fromLTWH(0, 0, size.width, size.height))
       ..style = PaintingStyle.fill;
+
     final path = Path();
     path.moveTo(0, size.height * 0.3);
+
     for (double x = 0; x <= size.width; x += 20) {
-      final y = size.height * 0.3 + 
-                math.sin(x * 0.02) * 15 +
-                math.sin(x * 0.01) * 8;
+      final y =
+          size.height * 0.3 + math.sin(x * 0.02) * 15 + math.sin(x * 0.01) * 8;
+
       path.lineTo(x, y);
     }
+
     path.lineTo(size.width, size.height);
     path.lineTo(0, size.height);
     path.close();
+
     canvas.drawPath(path, paint);
   }
 
